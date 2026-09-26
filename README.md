@@ -1,4 +1,4 @@
-# rbxm2SL — split project + Creator Store import
+# rbxm2SL — split project + Creator Store import (v1.3)
 
 Project dipisah menjadi HTML/CSS/JS agar `index.html` tidak membengkak. Import Creator Store menggunakan Roblox Asset Delivery melalui proxy/server-side function agar tidak terkena CORS browser.
 
@@ -18,7 +18,7 @@ Folder `functions/` otomatis menjadi API route:
 
 Frontend akan memakai route same-origin tersebut tanpa perlu mengubah `config.js`.
 
-## Opsi B — Tetap GitHub Pages
+## Opsi B — Tetap GitHub Pages (wajib pakai Worker)
 
 GitHub Pages hanya menyediakan file statis; proxy server-side tidak bisa dijalankan langsung di GitHub Pages.
 

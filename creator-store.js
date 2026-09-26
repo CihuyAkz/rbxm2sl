@@ -44,9 +44,16 @@
     var configured = (window.RBXM2SL_CONFIG && window.RBXM2SL_CONFIG.CREATOR_STORE_PROXY_URL) || '';
     configured = String(configured).trim();
     if (configured) return configured.replace(/\/+$/, '') + '/';
+
     if (location.protocol === 'file:') {
-      throw new Error('Project sedang dibuka sebagai file://. Jalankan start.bat/start.sh, atau gunakan deployment Cloudflare Pages.');
+      throw new Error('Project dibuka dari file://. Jalankan start.bat/start.sh atau deploy ke hosting yang menjalankan API.');
     }
+
+    // GitHub Pages is static-only, so /api/... does not exist there.
+    if (/(^|\.)github\.io$/i.test(location.hostname)) {
+      throw new Error('GitHub Pages tidak menyediakan /api. Deploy workers/creator-store-proxy.js sebagai Cloudflare Worker lalu isi CREATOR_STORE_PROXY_URL di config.js.');
+    }
+
     return '/api/creator-store/asset/';
   }
 
@@ -64,6 +71,9 @@
         var json = await response.json();
         detail = json && (json.error || json.detail) ? ' ' + (json.error || json.detail) : '';
       } catch (_) {}
+      if (response.status === 404 && !detail) {
+        detail = ' Endpoint proxy tidak ditemukan. Pastikan URL proxy/Cloudflare Worker sudah benar.';
+      }
       throw new Error('Gagal mengambil asset (HTTP ' + response.status + ').' + detail);
     }
 

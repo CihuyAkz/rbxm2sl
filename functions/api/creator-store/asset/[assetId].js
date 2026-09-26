@@ -4,39 +4,51 @@ export async function onRequestGet(context) {
     return json({ error: 'Invalid assetId.' }, 400);
   }
 
-  const target = `https://assetdelivery.roblox.com/v2/assetId/${encodeURIComponent(assetId)}`;
+  const candidates = [
+    `https://assetdelivery.roblox.com/v1/asset/?id=${encodeURIComponent(assetId)}`,
+    `https://assetdelivery.roblox.com/v1/assetId/${encodeURIComponent(assetId)}`,
+    `https://assetdelivery.roblox.com/v2/assetId/${encodeURIComponent(assetId)}`
+  ];
 
-  try {
-    const upstream = await fetch(target, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: {
-        'Accept': 'application/octet-stream, application/xml, text/xml, */*',
-        'User-Agent': 'rbxm2SL-creator-store/1.2'
+  let lastStatus = 502;
+  let lastDetail = '';
+
+  for (const target of candidates) {
+    try {
+      const upstream = await fetch(target, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: {
+          'Accept': 'application/octet-stream, application/xml, text/xml, */*',
+          'User-Agent': 'rbxm2SL-creator-store/1.3'
+        }
+      });
+
+      if (upstream.ok) {
+        const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+        const headers = new Headers();
+        headers.set('Content-Type', contentType);
+        headers.set('Cache-Control', 'no-store');
+        headers.set('X-Roblox-Asset-Id', assetId);
+        headers.set('X-Roblox-Asset-Endpoint', target);
+        return new Response(upstream.body, { status: 200, headers });
       }
-    });
 
-    if (!upstream.ok) {
-      const detail = (await upstream.text().catch(() => '')).slice(0, 1000);
-      return json({
-        error: `Roblox returned HTTP ${upstream.status}.`,
-        detail
-      }, upstream.status);
+      lastStatus = upstream.status;
+      lastDetail = (await upstream.text().catch(() => '')).slice(0, 1000);
+      if (upstream.status !== 404) break;
+    } catch (error) {
+      lastStatus = 502;
+      lastDetail = error?.message || String(error);
     }
-
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-    const headers = new Headers();
-    headers.set('Content-Type', contentType);
-    headers.set('Cache-Control', 'no-store');
-    headers.set('X-Roblox-Asset-Id', assetId);
-
-    return new Response(upstream.body, { status: 200, headers });
-  } catch (error) {
-    return json({
-      error: 'Proxy gagal menghubungi Roblox Asset Delivery.',
-      detail: error?.message || String(error)
-    }, 502);
   }
+
+  return json({
+    error: `Roblox Asset Delivery tidak mengembalikan asset yang dapat diunduh (HTTP ${lastStatus}).`,
+    detail: lastDetail,
+    assetId,
+    tried: candidates
+  }, lastStatus);
 }
 
 function json(payload, status = 200) {
