@@ -6,9 +6,6 @@
   var status = document.getElementById('creatorStoreStatus');
   if (!input || !button || !status) return;
 
-  var DEFAULT_URL = 'https://create.roblox.com/store/asset/80608769509945/NPC-Dialogue-System';
-  input.value = '';
-
   function creatorStatus(message, kind) {
     status.textContent = message;
     status.classList.remove('success', 'error', 'loading');
@@ -18,7 +15,6 @@
   function extractAssetId(value) {
     var raw = String(value || '').trim();
     if (!raw) return null;
-
     if (/^\d+$/.test(raw)) return raw;
 
     var match = raw.match(/(?:create\.roblox\.com\/store\/asset\/|www\.roblox\.com\/library\/|roblox\.com\/library\/)(\d+)/i);
@@ -41,13 +37,43 @@
 
   function looksLikeBinaryRoblox(bytes) {
     if (!bytes || bytes.length < 8) return false;
-    var magic = new TextDecoder().decode(bytes.subarray(0, 8));
-    return magic === '<roblox!';
+    return new TextDecoder().decode(bytes.subarray(0, 8)) === '<roblox!';
+  }
+
+  function getProxyBase() {
+    var configured = (window.RBXM2SL_CONFIG && window.RBXM2SL_CONFIG.CREATOR_STORE_PROXY_URL) || '';
+    configured = String(configured).trim();
+    if (configured) return configured.replace(/\/+$/, '') + '/';
+    if (location.protocol === 'file:') {
+      throw new Error('Project sedang dibuka sebagai file://. Jalankan start.bat/start.sh, atau gunakan deployment Cloudflare Pages.');
+    }
+    return '/api/creator-store/asset/';
+  }
+
+  async function fetchCreatorAsset(assetId) {
+    var endpoint = getProxyBase() + encodeURIComponent(assetId);
+    var response = await fetch(endpoint, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/octet-stream, application/xml, text/xml, */*' }
+    });
+
+    if (!response.ok) {
+      var detail = '';
+      try {
+        var json = await response.json();
+        detail = json && (json.error || json.detail) ? ' ' + (json.error || json.detail) : '';
+      } catch (_) {}
+      throw new Error('Gagal mengambil asset (HTTP ' + response.status + ').' + detail);
+    }
+
+    return response;
   }
 
   async function importFromCreatorStore() {
     var source = input.value.trim();
     var assetId = extractAssetId(source);
+
     if (!assetId) {
       creatorStatus('Asset ID / Creator Store URL tidak valid.', 'error');
       input.focus();
@@ -55,21 +81,12 @@
     }
 
     button.disabled = true;
-    creatorStatus('Mengambil asset ' + assetId + ' dari Roblox Asset Delivery...', 'loading');
+    var configuredProxy = (window.RBXM2SL_CONFIG && window.RBXM2SL_CONFIG.CREATOR_STORE_PROXY_URL) || '';
+    creatorStatus('Mengambil asset ' + assetId + (configuredProxy ? ' melalui Creator Store proxy...' : ' melalui API project...'), 'loading');
     setStatus('Downloading Creator Store asset ' + assetId + '...');
 
     try {
-      var response = await fetch('https://assetdelivery.roblox.com/v2/assetId/' + encodeURIComponent(assetId), {
-        method: 'GET',
-        credentials: 'omit',
-        redirect: 'follow',
-        headers: { 'Accept': 'application/octet-stream, application/xml, text/xml, */*' }
-      });
-
-      if (!response.ok) {
-        throw new Error('Roblox returned HTTP ' + response.status + '. Asset mungkin private, restricted, dihapus, atau tidak dapat diakses.');
-      }
-
+      var response = await fetchCreatorAsset(assetId);
       var buffer = await response.arrayBuffer();
       var bytes = new Uint8Array(buffer);
       if (!bytes.length) throw new Error('Roblox mengembalikan file kosong.');
@@ -79,10 +96,9 @@
       var asBinary = contentType.indexOf('x-rbxm') !== -1 || looksLikeBinaryRoblox(bytes);
 
       if (!asXml && !asBinary) {
-        throw new Error('Asset berhasil diambil, tetapi formatnya bukan .rbxm/.rbxmx yang bisa dibaca parser ini.');
+        throw new Error('Asset berhasil diambil, tetapi formatnya bukan .rbxm/.rbxmx yang dapat dibaca parser ini.');
       }
 
-      // Reuse the existing parser instead of duplicating the large parser code.
       if (asXml) {
         setStatus('Creator Store asset detected as XML. Parsing...');
         parseXML(new TextDecoder('utf-8', { fatal: false }).decode(bytes));
@@ -91,23 +107,18 @@
         parseBinary(bytes);
       }
 
-      var displaySource = source || ('Asset ID ' + assetId);
       creatorStatus('Berhasil mengimpor asset ' + assetId + ' (' + fmtSize(bytes.byteLength) + ').', 'success');
       setStatus('Successfully imported Creator Store asset ' + assetId + ' from Roblox.');
 
-      // Preserve a small audit trail without storing the whole downloaded file.
       window.LAST_CREATOR_STORE_IMPORT = {
         assetId: assetId,
-        source: displaySource,
+        source: source || ('Asset ID ' + assetId),
         bytes: bytes.byteLength,
         importedAt: new Date().toISOString()
       };
     } catch (error) {
       var msg = error && error.message ? error.message : String(error);
-      var corsHint = /failed to fetch|networkerror|cors/i.test(msg)
-        ? ' Browser mungkin memblokir CORS; jalankan project melalui localhost/web server jika file dibuka langsung dari file://.'
-        : '';
-      creatorStatus('Gagal mengimpor: ' + msg + corsHint, 'error');
+      creatorStatus('Gagal mengimpor: ' + msg, 'error');
       setStatus('Creator Store import failed.');
     } finally {
       button.disabled = false;
